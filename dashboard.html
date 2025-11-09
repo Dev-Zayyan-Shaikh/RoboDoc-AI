@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RoboDoc Dashboard</title>
+  <link rel="icon" href="favicon.png">
+
+  <!-- Tailwind CDN (v2 compatible used earlier) -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.8.0/dist/chart.min.js"></script>
+
+  <!-- Lottie -->
+  <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
+
+  <!-- Razorpay -->
+   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <style>
+    .sidebar {
+      min-width: 240px;
+    }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+    }
+ 
+  .typewriter::after {
+    content: '|';
+    animation: blink 0.7s infinite;
+    color: #2563eb;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  
+  @keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+.shake { animation: shake 0.3s; }
+
+/* Make Smart Tools list interactive */
+#dashboard ul.text-sm.text-gray-600.space-y-2 li {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+#dashboard ul.text-sm.text-gray-600.space-y-2 li:hover {
+  color: #2563eb;
+  transform: translateX(3px);
+}
+
+
+/* ====================== */
+/* 📱 SIDEBAR RESPONSIVE  */
+/* ====================== */
+
+/* Sidebar hidden by default on mobile */
+@media (max-width: 900px) {
+  .sidebar {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: white;
+    z-index: 50;
+    min-width: 70%;
+    max-width: 80%;
+    height: 100%;
+    box-shadow: 0 0 15px rgba(0,0,0,0.15);
+    animation: slideIn 0.3s ease forwards;
+  }
+
+  .sidebar.active {
+    display: flex;
+  }
+
+  @keyframes slideIn {
+    from { transform: translateX(-100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* Dim background when sidebar opens */
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 40;
+    backdrop-filter: blur(2px);
+  }
+  .sidebar-backdrop.active {
+    display: block;
+  }
+}
+
+
+  </style>
+
+
+</head>
+<body class="bg-gradient-to-br from-blue-50 via-white to-green-50 min-h-screen font-sans">
+
+<!-- Firebase SDK modules (v10) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
+  import {
+    getAuth,
+    signOut,
+    onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+  import {
+    getFirestore,
+    doc,
+    getDoc,
+    setDoc,
+    collection,
+    addDoc,
+    query,
+    where,
+    orderBy,
+    limit,
+    getDocs,
+    deleteDoc,
+    serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+
+  import { updateProfile } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+
+  // ---------- CONFIG: Your complete Firebase config ----------
+  const firebaseConfig = {
+    apiKey: "AIzaSyBAsbvZbtA5dgk_fFMqVI2j4kBckp6n62c",
+    authDomain: "robodoc-db1d3.firebaseapp.com",
+    projectId: "robodoc-db1d3",
+    storageBucket: "robodoc-db1d3.firebasestorage.app",
+    messagingSenderId: "886593524703",
+    appId: "1:886593524703:web:5b8e2c82959aa632ba6a6a"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  // Helper toast
+  function toast(msg, type="info") {
+    const colors = { info: "bg-blue-500", success: "bg-green-500", error: "bg-red-500" };
+    const t = document.createElement("div");
+    t.className = `${colors[type] || colors.info} text-white px-4 py-2 rounded fixed top-6 right-6 shadow z-50`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=> t.remove(), 3000);
+  }
+
+  // Global variables
+  let currentUser = null;
+  let currentUserDoc = null;
+  let lastAnalysisId = null;
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    console.log("No user detected, redirecting to login");
+    window.location.replace("login.html");
+    return;
+  }
+
+  console.log("✅ User authenticated:", user.email);
+  currentUser = user;
+
+  const avatar = document.getElementById("userAvatar");
+  const initial = document.getElementById("userInitial");
+  const username = document.getElementById("username");
+  const emailDisplay = document.getElementById("userEmail");
+
+  // Default values
+  let photoURL = user.photoURL || null;
+let displayName = user.displayName || "";
+
+
+  try {
+    // 🧠 Fetch user doc from Firestore (wait properly)
+    const userDocRef = doc(db, "user", user.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      console.log("📦 Firestore data:", data);
+
+      // Overwrite Auth values if Firestore has better info
+      if (data.name) displayName = data.name;
+      if (data.email) emailDisplay.textContent = data.email;
+      if (data.photoURL) photoURL = data.photoURL;
+    } else {
+      console.log("⚠️ No user doc found for:", user.uid);
+    }
+  } catch (err) {
+    console.error("🔥 Error fetching Firestore data:", err);
+  }
+
+  // 🎨 If still no photo, generate a random avatar
+  if (!photoURL) {
+    const seed = displayName.replace(/\s+/g, "") || user.uid;
+    photoURL = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(seed)}`;
+  }
+
+  // ✅ Apply avatar and name
+  if (photoURL) {
+    avatar.src = photoURL;
+    avatar.classList.remove("hidden");
+    initial.classList.add("hidden");
+  } else {
+    initial.textContent = displayName.charAt(0).toUpperCase();
+    avatar.classList.add("hidden");
+    initial.classList.remove("hidden");
+  }
+
+  const finalName = displayName || userSnap.data()?.name || user.email.split("@")[0];
+username.textContent = finalName;
+document.getElementById("usernameHeader").textContent = finalName;
+
+  emailDisplay.textContent = user.email;
+
+  // 💥 Finally load the rest of dashboard
+  await initializeDashboard();
+});
+
+
+  async function initializeDashboard() {
+    try {
+      // Load user data from Firestore
+      const userDocRef = doc(db, "user", currentUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      
+      if (userSnap.exists()) {
+        currentUserDoc = userSnap.data();
+      }
+
+      // Update UI with user info
+      const displayName = currentUser.displayName || currentUserDoc?.name || "User";
+      document.getElementById("usernameHeader").textContent = displayName;
+      document.getElementById("username").textContent = displayName;
+      document.getElementById("userEmail").textContent = currentUser.email;
+
+      // Load analyses and chart
+      await loadAnalysesAndChart();
+
+      toast("Welcome back!", "success");
+    } catch (error) {
+      console.error("Error initializing dashboard:", error);
+      toast("Error loading dashboard: " + error.message, "error");
+    }
+  }
+
+  // Elements references after DOM ready
+  document.addEventListener("DOMContentLoaded", async () => {
+    // UI elements
+    const logoutBtn = document.getElementById("logoutBtn");
+    const formEl = document.getElementById("symptomForm");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const resultsContainer = document.getElementById("resultsContainer");
+    const analysesList = document.getElementById("analysesList");
+    const chartCanvas = document.getElementById("healthChart");
+  
+    // LOGOUT
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await signOut(auth);
+        window.location.replace("login.html");
+      } catch (error) {
+        toast("Logout failed: " + error.message, "error");
+      }
+    });
+
+    // 🔧 Removes undefined values so Firestore doesn't scream
+function cleanUndefined(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+
+    // SUBMIT / ANALYZE
+    analyzeBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+
+      if (!currentUser) {
+        toast("Not authenticated", "error");
+        return;
+      }
+
+      // read form fields
+      const form = new FormData(formEl);
+      const payload = {
+        userId: currentUser.uid,
+        name: form.get("name"),
+        age: form.get("age"),
+        gender: form.get("gender"),
+        weight: form.get("weight"),
+        height: form.get("height"),
+        symptoms: form.get("symptoms"),
+        severity: form.get("severity"),
+        details: form.get("details"),
+        agents: []
+      };
+      if (form.get("agent_ayurvedic")) payload.agents.push("ayurvedic");
+      if (form.get("agent_allopathic")) payload.agents.push("allopathic");
+      if (form.get("agent_homeopathic")) payload.agents.push("homeopathic");
+
+      if (!payload.symptoms || payload.agents.length === 0) {
+        toast("Please add symptoms and choose at least one agent", "error");
+        return;
+      }
+
+      analyzeBtn.disabled = true;
+      analyzeBtn.textContent = "Analyzing...";
+      resultsContainer.innerHTML = "";
+      toast("Saving and analyzing...");
+
+      // 💰 Deduct coins for all selected agents (10 per agent)
+const totalDeduction = payload.agents.length * 10;
+const walletRef = doc(db, "wallets", currentUser.uid);
+const walletSnap = await getDoc(walletRef);
+const oldCoins = walletSnap.exists() ? walletSnap.data().coins || 0 : 0;
+
+if (oldCoins < totalDeduction) {
+  toast(`⚠️ Not enough coins! You need ${totalDeduction} coins but have only ${oldCoins}.`, "error");
+  analyzeBtn.disabled = false;
+  analyzeBtn.textContent = "Analyze";
+  return;
+}
+
+const newBalance = oldCoins - totalDeduction;
+
+// 🔥 Update wallet balance in Firestore
+await setDoc(
+  walletRef,
+  {
+    coins: newBalance,
+    lastTransaction: new Date().toISOString(),
+    source: "multi_agent_analysis",
+    deducted: totalDeduction
+  },
+  { merge: true }
+);
+
+// ✅ Update UI coin balance
+await updateBalanceUI(newBalance);
+
+toast(`💰 Deducted ${totalDeduction} coins for ${payload.agents.length} selected agent(s).`, "info");
+
+
+      try {
+        // Save the request to Firestore (collection 'analyses')
+        const analysesRef = collection(db, "analyses");
+        const cleanedPayload = cleanUndefined(payload);
+
+const docRef = await addDoc(analysesRef, {
+  userId: cleanedPayload.userId,
+  form: cleanedPayload,
+  agents: cleanedPayload.agents,
+  status: "queued",
+  createdAt: serverTimestamp(),
+  createdAtLocal: new Date().toISOString() // 👈 instant fallback
+});
+
+
+        lastAnalysisId = docRef.id;
+
+// 🧠 Call all selected AI agent endpoints (parallel + smooth)
+const results = {};
+toast("Analyzing with selected doctors...", "info");
+
+// Create loading cards first (so UI doesn’t look dead)
+payload.agents.forEach(agent => {
+  renderAgentResult(agent, "⏳ Analyzing your symptoms...");
+});
+
+// Run all API calls simultaneously
+const promises = payload.agents.map(async (agent) => {
+  try {
+    const res = await fetch(`/api/analyze-${agent}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid: currentUser.uid,
+        name: payload.name,
+        age: payload.age,
+        gender: payload.gender,
+        symptoms: payload.symptoms,
+        severity: payload.severity,
+        details: payload.details,
+      
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      results[agent] = data.result;
+      renderAgentResult(agent, data.result);
+    } else {
+      results[agent] = `⚠️ ${data.error || "Analysis failed"}`;
+      renderAgentResult(agent, results[agent]);
+    }
+  } catch (err) {
+    console.error(`Error from ${agent}:`, err);
+    results[agent] = `🔥 ${agent} doctor crashed: ${err.message}`;
+    renderAgentResult(agent, results[agent]);
+  }
+});
+
+// Wait for all agents to complete
+await Promise.all(promises);
+
+// ✅ Save all results to Firestore once finished
+await setDoc(
+  doc(db, "analyses", docRef.id),
+  {
+    results,
+    status: "done",
+    completedAt: serverTimestamp()
+  },
+  { merge: true }
+);
+
+
+// 🧩 Update chart + history
+await loadAnalysesAndChart();
+
+// Refresh balance from Firestore so UI shows the authoritative value
+await updateBalanceUI();
+
+// Friendly final toast
+toast("All analyses completed ✅", "success");
+
+
+      } catch (err) {
+        console.error(err);
+        toast("Analysis failed: " + err.message, "error");
+      } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = "Analyze";
+      }
+    });
+
+    window.loadHistory = async function () {
+  if (!currentUser) return;
+  const historyList = document.getElementById("historyList");
+  const totalAnalysesEl = document.getElementById("totalAnalyses");
+  const totalCoinsEl = document.getElementById("totalCoinsUsed");
+  const lastActivityEl = document.getElementById("lastActivity");
+
+  try {
+    const q = query(
+      collection(db, "analyses"),
+      where("userId", "==", currentUser.uid),
+      orderBy("createdAt", "desc")
+    );
+    const snaps = await getDocs(q);
+    const items = [];
+    let totalCoins = 0;
+
+    snaps.forEach(docSnap => {
+      const data = docSnap.data();
+      totalCoins += (data.agents?.length || 1) * 10;
+      items.push({
+        id: docSnap.id,
+        form: data.form,
+        agents: data.agents || [],
+        createdAt: data.createdAt?.seconds
+          ? new Date(data.createdAt.seconds * 1000).toLocaleString("en-IN", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit"
+            })
+          : "Recent",
+      });
+    });
+
+    totalAnalysesEl.textContent = items.length;
+    totalCoinsEl.textContent = totalCoins;
+    lastActivityEl.textContent = items.length ? items[0].createdAt : "No activity";
+
+    historyList.innerHTML = items.length
+      ? items.map(
+          a => `
+        <div class="p-4 border rounded-lg bg-white hover:bg-blue-50 transition cursor-pointer" data-id="${a.id}">
+          <div class="text-sm text-gray-700 font-semibold mb-1">${a.createdAt}</div>
+          <div class="flex items-center gap-2 text-xs text-gray-600 mb-1">
+            <span>🩺 Agents:</span>
+            ${a.agents.map(agent => `<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">${agent}</span>`).join("")}
+          </div>
+          <div class="text-sm text-gray-800">🩹 <b>Symptoms:</b> ${a.form?.symptoms || "N/A"}</div>
+          <div class="text-xs text-gray-500">Severity: ${a.form?.severity || "-"}</div>
+        </div>`
+        ).join("")
+      : `<div class="text-gray-500 text-sm">No history yet.</div>`;
+
+    // ✅ Now attach click listeners AFTER rendering
+    historyList.querySelectorAll("[data-id]").forEach(card => {
+      card.addEventListener("click", async () => {
+        const docRef = doc(db, "analyses", card.dataset.id);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const resultsContainer = document.getElementById("resultsContainer");
+          resultsContainer.innerHTML = "";
+          for (const [agent, result] of Object.entries(data.results || {})) {
+            renderAgentResult(agent, result);
+          }
+          toast("Loaded past analysis ✅", "success");
+          document.querySelector('[data-section="dashboard"]').click();
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error(err);
+    historyList.innerHTML = `<div class="text-red-600 text-sm">⚠️ Failed to load history: ${err.message || "Unknown error"}</div>`;
+  }
+};
+
+
+// 🖱️ Click to view analysis results directly
+historyList.querySelectorAll("[data-id]").forEach(card => {
+  card.addEventListener("click", async () => {
+    const docRef = doc(db, "analyses", card.dataset.id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const resultsContainer = document.getElementById("resultsContainer");
+      resultsContainer.innerHTML = "";
+      for (const [agent, result] of Object.entries(data.results || {})) {
+        renderAgentResult(agent, result);
+      }
+      toast("Loaded past analysis ✅", "success");
+      document.querySelector('[data-section="dashboard"]').click();
+    }
+  });
+});
+
+
+// 💡 Trigger when user clicks History tab
+document.querySelector('[data-section="history"]').addEventListener("click", loadHistory);
+
+// 🧠 Summarize Health Button
+document.getElementById("summarizeHealthBtn").addEventListener("click", async () => {
+  if (!currentUser) return toast("Not logged in!", "error");
+  toast("🧾 Health Summarizer is analyzing your data...", "info");
+
+  const res = await fetch("/api/tool-summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid: currentUser.uid }),
+  });
+
+  const data = await res.json();
+  if (data.success) {
+    const summaryDiv = document.createElement("div");
+    summaryDiv.className =
+      "mt-4 bg-gradient-to-br from-blue-50 to-green-50 border rounded-lg p-4 text-gray-800 whitespace-pre-wrap";
+    summaryDiv.textContent = data.result;
+    historyList.prepend(summaryDiv);
+  } else {
+    toast(data.error || "Summary failed", "error");
+  }
+});
+
+
+    // Load recent analyses and build chart
+    window.loadAnalysesAndChart = async function() {
+      if (!currentUser) return;
+
+      try {
+        const analysesRef = collection(db, "analyses");
+        const q = query(analysesRef, where("userId","==",currentUser.uid), orderBy("createdAt","desc"), limit(12));
+        const snaps = await getDocs(q);
+        const items = [];
+        snaps.forEach(s => {
+          const d = s.data();
+          d.id = s.id;
+          items.push(d);
+        });
+
+        // Build analyses list
+        analysesList.innerHTML = "";
+        if (items.length === 0) {
+          analysesList.innerHTML = '<div class="p-3 text-sm text-gray-500 italic">No analyses yet</div>';
+        } else {
+         for (const a of items) {
+  const li = document.createElement("div");
+  li.className = "p-3 border-b hover:bg-gray-50 cursor-pointer";
+
+  const createdAt = a.createdAt?.seconds
+    ? new Date(a.createdAt.seconds * 1000).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      })
+    : a.createdAtLocal
+    ? new Date(a.createdAtLocal).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      })
+    : "Recent";
+
+  li.innerHTML = `
+    <div class="text-sm text-gray-700">${createdAt}</div>
+    <div class="text-xs text-gray-500">${a.form?.symptoms?.slice(0,60) || "No symptoms"}</div>
+  `;
+
+  li.addEventListener("click", () => {
+    resultsContainer.innerHTML = "";
+    if (a.results) {
+      for (const k of Object.keys(a.results)) {
+        renderAgentResult(k, a.results[k]);
+      }
+    } else {
+      resultsContainer.innerHTML = `<div class="p-6 text-gray-600">No results yet for this analysis.</div>`;
+    }
+  });
+
+  analysesList.appendChild(li);
+}
+
+        }
+
+        // Build chart
+        const labels = [];
+        const dataPoints = [];
+        const reversedItems = [...items].reverse();
+        reversedItems.forEach(it => {
+          const ts = it.createdAt?.seconds ? new Date(it.createdAt.seconds * 1000) : new Date();
+          labels.push(ts.toLocaleDateString());
+          const sev = Number(it.form?.severity) || 5;
+          dataPoints.push(sev);
+        });
+
+        if (chartCanvas) {
+          if (chartCanvas._chart) chartCanvas._chart.destroy();
+          chartCanvas._chart = new Chart(chartCanvas.getContext("2d"), {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [{
+                label: "Severity over time",
+                data: dataPoints,
+                borderColor: "rgba(14,165,233,0.9)",
+                backgroundColor: "rgba(16,185,129,0.12)",
+                tension: 0.3,
+                fill: true
+              }]
+            },
+            options: {
+              responsive: true,
+              plugins: { legend: { display: false } },
+              scales: {
+                y: { suggestedMin: 0, suggestedMax: 10 }
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.error("error loading analyses", err);
+        toast("Error loading history: " + err.message, "error");
+      }
+    };
+
+
+
+   // Renders agent result with typewriter effect + continue chat button
+function renderAgentResult(agent, text) {
+    let lastBotReply = text; // store the last message for this doctor
+  const wrapper = document.createElement("div");
+  wrapper.className = "mb-6 bg-white p-6 rounded-xl shadow relative";
+  
+  const title = document.createElement("div");
+  title.className = "text-lg font-semibold mb-3 text-blue-700";
+  title.textContent = agent.charAt(0).toUpperCase() + agent.slice(1);
+
+  const content = document.createElement("div");
+  content.className = "typewriter text-gray-700 mb-4";
+  typeWriterEffect(content, text);
+
+  // 💬 Inline Chat UI
+  const chatBox = document.createElement("div");
+  chatBox.className = "flex gap-2 items-center border-t pt-3 mt-3";
+
+  const chatInput = document.createElement("input");
+  chatInput.placeholder = `Ask ${agent} doctor a follow-up...`;
+  chatInput.className = "flex-1 p-2 border rounded focus:ring-2 focus:ring-blue-400";
+
+  const sendBtn = document.createElement("button");
+  sendBtn.textContent = "Send";
+  sendBtn.className = "bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition";
+
+
+  chatBox.appendChild(chatInput);
+  chatBox.appendChild(sendBtn);
+
+  wrapper.appendChild(title);
+  wrapper.appendChild(content);
+  wrapper.appendChild(chatBox);
+  resultsContainer.appendChild(wrapper);
+
+ // ✨ Send follow-up handler
+sendBtn.addEventListener("click", async () => {
+  const msg = chatInput.value.trim();
+  if (!msg) return toast("Write something first!", "error");
+
+  // render your question
+  const userMsg = document.createElement("div");
+  userMsg.className = "text-right text-blue-700 font-medium my-2";
+  userMsg.textContent = `You: ${msg}`;
+  content.appendChild(userMsg);
+  chatInput.value = "";
+
+  try {
+    const res = await fetch(`/api/analyze-${agent}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid: currentUser.uid,
+        name: "Follow-up",
+        symptoms: msg,
+        severity: 5,
+        gender: "N/A",
+        details: "",
+        followUp: true,
+        lastResponse: lastBotReply // 👈 send *this doctor's* last reply only
+      }),
+    });
+
+    const data = await res.json();
+    const botMsg = document.createElement("div");
+    botMsg.className = "text-left text-gray-800 bg-gray-100 p-2 rounded-lg my-2";
+
+    if (data.success) {
+  typeWriterEffect(botMsg, data.result);
+  lastBotReply = data.result;
+      
+    } else {
+      botMsg.textContent = `⚠️ ${data.error || "AI failed to respond"}`;
+      botMsg.classList.add("text-red-600");
+    }
+
+    content.appendChild(botMsg);
+    content.scrollTop = content.scrollHeight;
+
+  } catch (err) {
+    console.error(err);
+    const errMsg = document.createElement("div");
+    errMsg.className = "text-left text-red-600 my-2";
+    errMsg.textContent = `💥 ${err.message}`;
+    content.appendChild(errMsg);
+  }
+});
+
+}
+    
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+    }
+  });
+
+   const pricePerCoin = 1; // 1 Coin = ₹1
+const coinsInput = document.getElementById('customCoins');
+const priceSpan = document.getElementById('customPrice');
+const buyCustomBtn = document.getElementById('buyCustomBtn');
+const coinBalanceSpan = document.getElementById('coinBalance');
+
+// --- Update custom price dynamically ---
+coinsInput.addEventListener('input', () => {
+  let coins = Math.max(10, Math.round(Number(coinsInput.value) / 10) * 10);
+  coinsInput.value = coins;
+  priceSpan.textContent = (coins * pricePerCoin).toFixed(0);
+});
+
+// --- Update UI balance safely ---
+async function updateBalanceUI(balance) {
+  try {
+    // 🧠 If no balance passed, fetch latest from Firestore
+    if (typeof balance === "undefined" || balance === null) {
+      const walletRef = doc(db, "wallets", currentUser.uid);
+      const walletSnap = await getDoc(walletRef);
+      balance = walletSnap.exists() ? (walletSnap.data().coins || 0) : 0;
+    }
+
+    // 💰 Update UI + global variable
+    coinBalanceSpan.textContent = balance;
+    window.__COINS__ = balance;
+
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    if (analyzeBtn) analyzeBtn.disabled = balance < 10;
+  } catch (err) {
+    console.warn("⚠️ Failed to update balance UI:", err);
+    coinBalanceSpan.textContent = "—";
+  }
+}
+
+
+// --- Start Razorpay flow ---
+async function startPurchase(coins, amountINR) {
+  try {
+    const auth = getAuth();
+    const user = auth.currentUser;
+    if (!user) return alert('Login first, chief.');
+
+    const orderRes = await fetch('/api/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: user.uid, coins, amount: amountINR })
+    });
+    const orderData = await orderRes.json();
+    if (!orderData?.id) throw new Error(orderData.error || "Order creation failed");
+
+    const options = {
+      key: orderData.key,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      name: 'RoboDoc Coins',
+      description: `${coins} Coins Recharge`,
+      order_id: orderData.id,
+      handler: async function (response) {
+        const verify = await fetch('/api/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: user.uid, coins, ...response })
+        });
+        const vjson = await verify.json();
+        if (vjson.success) {
+          alert(`Payment successful ✅\nNew balance: ${vjson.newBalance} coins`);
+          updateBalanceUI(vjson.newBalance);
+        } else {
+          alert(`Payment verification failed: ${vjson.message || 'Unknown error'}`);
+        }
+      },
+      prefill: { email: user.email, name: user.displayName || 'RoboDoc User' },
+      theme: { color: '#2563eb' }
+    };
+
+    new Razorpay(options).open();
+  } catch (err) {
+    console.error(err);
+    alert('⚠️ Payment failed: ' + err.message);
+  }
+}
+
+// --- Fetch balance on login ---
+// --- Fetch wallet balance from Firestore ---
+onAuthStateChanged(getAuth(), async (user) => {
+  if (!user) return;
+  try {
+    const walletRef = doc(db, "wallets", user.uid);
+    const walletSnap = await getDoc(walletRef);
+
+    if (walletSnap.exists()) {
+      const walletData = walletSnap.data();
+      const coins = walletData.coins || 0;
+      updateBalanceUI(coins);
+      console.log(`💰 Wallet fetched: ${coins} coins`);
+    } else {
+      console.log("⚠️ No wallet found for user, creating one...");
+      await setDoc(walletRef, {
+        coins: 50,
+        lastTransaction: new Date().toISOString(),
+        source: "auto_wallet_create",
+      });
+      updateBalanceUI(50);
+    }
+  } catch (err) {
+    console.error("🔥 Error fetching wallet:", err);
+    updateBalanceUI(0);
+  }
+});
+
+// --- Custom buy ---
+buyCustomBtn.addEventListener('click', async () => {
+  const coins = Number(coinsInput.value);
+  if (!coins || coins % 10 !== 0) return alert('Enter coins in multiples of 10');
+  await startPurchase(coins, coins * pricePerCoin);
+});
+
+// --- Quick packs ---
+document.querySelectorAll('.buy-fixed').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const coins = Number(btn.dataset.coins);
+    const price = Number(btn.dataset.price);
+    await startPurchase(coins, price);
+  });
+});
+
+// -------- AUTO TOOL ANALYSIS LOGIC --------
+const toolGrid = document.getElementById("toolsGrid");
+const toolOutput = document.getElementById("toolOutput");
+const toolTitle = document.getElementById("toolTitle");
+const toolResult = document.getElementById("toolResult");
+
+toolGrid.addEventListener("click", async (e) => {
+  const card = e.target.closest(".tool-card");
+  if (!card || !currentUser) return;
+
+  const tool = card.dataset.tool;
+  const titles = {
+    nutritionist: "🥗 AI Nutritionist",
+    chef: "👨‍🍳 AI Chef",
+    exercise: "🏋️‍♂️ Exercise Planner",
+    diet: "🍎 Diet Recommendations",
+  };
+
+  toolOutput.classList.remove("hidden");
+  toolTitle.textContent = `${titles[tool]} is analyzing your health...`;
+  toolResult.innerHTML = "⏳ Fetching your health data...";
+
+  try {
+    const res = await fetch(`/api/tool-${tool}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: currentUser.uid }),
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      toolTitle.textContent = titles[tool];
+      typeWriterEffect(toolResult, data.result);
+    } else {
+      toolResult.innerHTML = `⚠️ ${data.error || "Failed to analyze"}`;
+    }
+  } catch (err) {
+    toolResult.innerHTML = `💥 ${err.message}`;
+  }
+});
+
+
+document.querySelector('[data-section="settings"]').addEventListener("click", async () => {
+  const nameField = document.getElementById("settingsName");
+  const emailField = document.getElementById("settingsEmail");
+  const coinsDisplay = document.getElementById("settingsCoins");
+
+  const saveBtn = document.getElementById("saveSettingsBtn");
+  const delBtn = document.getElementById("deleteAccountBtn");
+  const pricingBtn = document.getElementById("goToPricing");
+
+  // Fetch user info
+  const userDoc = await getDoc(doc(db, "user", currentUser.uid));
+  const walletDoc = await getDoc(doc(db, "wallets", currentUser.uid));
+
+  if (userDoc.exists()) {
+    const data = userDoc.data();
+    nameField.value = data.name || currentUser.displayName || "";
+    emailField.value = data.email || currentUser.email || "";
+  }
+
+  coinsDisplay.textContent = walletDoc.exists()
+    ? `${walletDoc.data().coins || 0} Coins`
+    : "0 Coins";
+
+    // 🧩 Save changes (when the user clicks "Save Changes")
+saveBtn.onclick = async () => {
+  try {
+    await setDoc(doc(db, "user", currentUser.uid), { name: nameField.value }, { merge: true });
+    await updateProfile(currentUser, { displayName: nameField.value });
+
+    // ✅ Instantly update UI
+    document.getElementById("username").textContent = nameField.value;
+    document.getElementById("usernameHeader").textContent = nameField.value;
+
+    toast("✅ Profile updated successfully", "success");
+  } catch (err) {
+    toast("❌ Failed to save changes: " + err.message, "error");
+  }
+};
+
+
+
+
+  // Delete
+  delBtn.onclick = async () => {
+    if (confirm("⚠️ This will permanently delete your account data. Proceed?")) {
+      await setDoc(doc(db, "user", currentUser.uid), { deleted: true }, { merge: true });
+      toast("Account marked for deletion.", "info");
+    }
+  };
+
+  // Shortcut to pricing
+  pricingBtn.onclick = () => {
+    document.querySelector('[data-section="pricing"]').click();
+  };
+});
+
+// 🧨 Delete Analyses with Username Confirmation
+const deleteModal = document.getElementById("deleteModal");
+const openDeleteModalBtn = document.getElementById("openDeleteModalBtn");
+const cancelDeleteBtn = document.getElementById("cancelDeleteBtn");
+const confirmDeleteBtn = document.getElementById("confirmDeleteBtn");
+const confirmUsernameInput = document.getElementById("confirmUsernameInput");
+const confirmUsernameText = document.getElementById("confirmUsernameText");
+
+// Open modal
+openDeleteModalBtn.addEventListener("click", () => {
+  if (!currentUser) return toast("Please log in first", "error");
+  confirmUsernameText.textContent =
+    currentUser.displayName || currentUser.email.split("@")[0];
+  confirmUsernameInput.value = "";
+  deleteModal.classList.remove("hidden");
+});
+
+// Cancel modal
+cancelDeleteBtn.addEventListener("click", () => {
+  deleteModal.classList.add("hidden");
+});
+
+// Confirm deletion
+confirmDeleteBtn.addEventListener("click", async () => {
+  const expectedName =
+    currentUser.displayName || currentUser.email.split("@")[0];
+  const typedName = confirmUsernameInput.value.trim();
+
+  
+  if (typedName !== expectedName) {
+  confirmUsernameInput.classList.add("shake");
+  setTimeout(() => confirmUsernameInput.classList.remove("shake"), 300);
+  toast("❌ Username mismatch!", "error");
+  return;
+}
+
+
+  try {
+    const analysesRef = collection(db, "analyses");
+    const q = query(analysesRef, where("userId", "==", currentUser.uid));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      toast("No records found to delete.", "info");
+      deleteModal.classList.add("hidden");
+      return;
+    }
+
+    const batch = [];
+    snap.forEach((docSnap) => {
+      batch.push(deleteDoc(doc(db, "analyses", docSnap.id)));
+    });
+
+    await Promise.all(batch);
+
+    deleteModal.classList.add("hidden");
+    toast("💣 All analysis records permanently deleted!", "success");
+
+    // Clear dashboard UI
+    document.getElementById("analysesList").innerHTML =
+      '<div class="text-gray-500 text-sm">No analyses yet.</div>';
+    document.getElementById("resultsContainer").innerHTML =
+      '<div class="text-gray-500 text-sm">All records wiped clean 💀</div>';
+  } catch (err) {
+    console.error(err);
+    toast("❌ Failed to delete analyses: " + err.message, "error");
+  }
+
+});
+
+// 🧠 Make Smart Tools in Overview open the Tools section
+document.querySelectorAll("#dashboard ul.text-sm.text-gray-600.space-y-2 li").forEach(li => {
+  li.style.cursor = "pointer";
+  li.addEventListener("click", () => {
+    const toolsTab = document.querySelector('[data-section="tools"]');
+    if (toolsTab) {
+      toolsTab.click();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast(`🔧 Opening ${li.textContent.trim()}...`, "info");
+    } else {
+      toast("⚠️ Tools section not found!", "error");
+    }
+  });
+});
+
+</script>
+
+<!-- PAGE LAYOUT -->
+<div class="flex min-h-screen">
+<!-- SIDEBAR -->
+<aside class="sidebar hidden md:flex flex-col bg-white/80 backdrop-blur-md border-r border-gray-100 shadow-lg w-56 transition-all duration-300 hover:w-60">
+  <div class="p-5 flex flex-col justify-between h-full">
+    <!-- Profile Section -->
+    <div>
+      <div class="flex items-center gap-3 mb-8">
+        <div id="userPhoto" class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center text-white font-bold overflow-hidden">
+          <img id="userAvatar" class="w-full h-full object-cover hidden" alt="User Avatar">
+          <span id="userInitial" class="text-lg font-bold">R</span>
+        </div>
+        <div class="overflow-hidden">
+          <div id="username" class="font-bold text-blue-700 truncate">User</div>
+          <div id="userEmail" class="text-xs text-gray-500 truncate">email@example.com</div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="space-y-2">
+        <button class="nav-btn w-full text-left px-4 py-2.5 rounded-lg text-gray-700 font-medium hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 hover:text-blue-700 transition-all duration-200" data-section="dashboard">Overview</button>
+     
+        <button class="nav-btn w-full text-left px-4 py-2.5 rounded-lg text-gray-700 font-medium hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 hover:text-blue-700 transition-all duration-200" data-section="tools">Tools</button>
+        <button class="nav-btn w-full text-left px-4 py-2.5 rounded-lg text-gray-700 font-medium hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 hover:text-blue-700 transition-all duration-200" data-section="history">History</button>
+        <button class="nav-btn w-full text-left px-4 py-2.5 rounded-lg text-gray-700 font-medium hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 hover:text-blue-700 transition-all duration-200" data-section="settings">Settings</button>
+        <button class="nav-btn w-full text-left px-4 py-2.5 rounded-lg text-gray-700 font-medium hover:bg-gradient-to-r hover:from-blue-50 hover:to-green-50 hover:text-blue-700 transition-all duration-200" data-section="pricing">
+  Pricing
+</button>
+
+      </nav>
+    </div>
+
+    <!-- Logout Button -->
+    <div class="mt-8">
+      <button id="logoutBtn" class="w-full bg-gradient-to-r from-red-500 to-pink-500 text-white py-2.5 rounded-lg font-semibold hover:from-red-600 hover:to-pink-600 shadow-md transition-all duration-200">
+        Log Out
+      </button>
+    </div>
+  </div>
+</aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 p-6">
+    <header class="flex items-center justify-between mb-6 relative">
+  <div class="flex items-center gap-3">
+    <!-- 🍔 Hamburger Icon -->
+    <button id="menuToggle" class="md:hidden p-2 border border-gray-200 rounded-lg hover:bg-gray-100 transition">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <h1 class="text-3xl font-extrabold text-blue-800">
+      Welcome Back, <span id="usernameHeader">User</span>!
+    </h1>
+  </div>
+</header>
+
+
+    <section id="dashboard" class="mb-10">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- Left: Analyzer Form -->
+    <div class="col-span-2 bg-white/90 backdrop-blur-sm p-8 rounded-2xl shadow-lg border border-gray-100 transition hover:shadow-xl">
+      <h2 class="text-2xl font-bold mb-6 text-blue-800 tracking-tight">Symptom Analyzer</h2>
+
+      <!-- Analyze Form -->
+      <form id="symptomForm" class="space-y-5">
+        <!-- Row 1 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <input name="name" placeholder="Full Name" class="p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent transition" required />
+          <input name="age" type="number" placeholder="Age" class="p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent transition" required />
+          <select name="gender" class="p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent transition">
+            <option value="" disabled selected hidden>Gender</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <!-- Row 2 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input name="weight" placeholder="Weight (kg)" class="p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-400 focus:border-transparent transition" />
+          <input name="height" placeholder="Height (cm)" class="p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-400 focus:border-transparent transition" />
+        </div>
+
+        <!-- Symptoms -->
+        <textarea name="symptoms" placeholder="Describe your symptoms in detail..." class="w-full p-4 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent transition" rows="4" required></textarea>
+
+      <div class="space-y-4">
+  <div class="flex flex-col sm:flex-row items-center sm:items-end justify-between gap-6">
+    <div class="flex flex-col flex-1">
+      <label for="severitySlider" class="text-gray-700 font-medium mb-2">Severity Level</label>
+      <div class="flex items-center gap-3">
+        <input 
+          id="severitySlider"
+          name="severity"
+          type="range"
+          min="1"
+          max="10"
+          value="5"
+          class="flex-1 appearance-none h-2 bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 rounded-lg cursor-pointer accent-blue-600"
+        />
+        <span id="severityValue" class="w-8 text-center text-lg font-semibold text-blue-700">5</span>
+      </div>
+    </div>
+    
+    <input 
+      name="details"
+      placeholder="Additional details (medical history, medications, etc.)"
+      class="p-3 border border-gray-200 rounded-lg flex-1 focus:ring-2 focus:ring-green-400 focus:border-transparent transition w-full sm:w-auto"
+    />
+  </div>
+</div>
+
+<!-- Agents -->
+<div class="mt-8">
+  <h3 class="text-xl font-bold text-blue-800 mb-1">Choose Agent</h3>
+  <p class="text-sm text-gray-600 mb-4">
+    Select one or more doctor types you’d like to analyze your symptoms with.
+  </p>
+
+  <div id="agentsContainer" class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+    <!-- Ayurvedic -->
+    <label class="relative flex flex-col p-5 bg-gradient-to-br from-green-50 to-green-100 border-2 border-transparent rounded-2xl cursor-pointer shadow-sm hover:shadow-md hover:border-green-400 transition group">
+      <input type="checkbox" name="agent_ayurvedic" class="absolute top-3 left-3 w-5 h-5 accent-green-600 group-hover:scale-110 transition" />
+      <div class="flex flex-col items-center text-center mt-2">
+        <div class="text-4xl mb-2">🌿</div>
+        <h3 class="text-lg font-semibold text-green-700">Ayurvedic</h3>
+        <p class="text-xs text-gray-600 mt-1">
+          Focuses on Dosha balance and natural remedies for long-term wellness.
+        </p>
+      </div>
+    </label>
+
+    <!-- Allopathic -->
+    <label class="relative flex flex-col p-5 bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-transparent rounded-2xl cursor-pointer shadow-sm hover:shadow-md hover:border-blue-400 transition group">
+      <input type="checkbox" name="agent_allopathic" class="absolute top-3 left-3 w-5 h-5 accent-blue-600 group-hover:scale-110 transition" />
+      <div class="flex flex-col items-center text-center mt-2">
+        <div class="text-4xl mb-2">💊</div>
+        <h3 class="text-lg font-semibold text-blue-700">Allopathic</h3>
+        <p class="text-xs text-gray-600 mt-1">
+          Modern evidence-based medicine analyzing symptoms and treatments.
+        </p>
+      </div>
+    </label>
+
+    <!-- Homeopathic -->
+    <label class="relative flex flex-col p-5 bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-transparent rounded-2xl cursor-pointer shadow-sm hover:shadow-md hover:border-purple-400 transition group">
+      <input type="checkbox" name="agent_homeopathic" class="absolute top-3 left-3 w-5 h-5 accent-purple-600 group-hover:scale-110 transition" />
+      <div class="flex flex-col items-center text-center mt-2">
+        <div class="text-4xl mb-2">🧴</div>
+        <h3 class="text-lg font-semibold text-purple-700">Homeopathic</h3>
+        <p class="text-xs text-gray-600 mt-1">
+          Gentle remedies targeting root causes through personalized healing.
+        </p>
+      </div>
+    </label>
+  </div>
+</div>
+
+
+
+        <!-- Buttons -->
+        <div class="mt-6 flex gap-4 flex-wrap">
+          <button id="analyzeBtn" type="button" class="bg-gradient-to-r from-blue-600 to-green-500 text-white px-8 py-3 rounded-lg font-semibold shadow-md hover:from-blue-700 hover:to-green-600 transform hover:-translate-y-0.5 transition">
+            Analyze
+          </button>
+          <button type="reset" class="px-8 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-gray-700 transition">
+            Reset
+          </button>
+        </div>
+      </form>
+
+      <!-- Results -->
+      <div id="resultsContainer" class="mt-8 space-y-6"></div>
+    </div>
+
+    <!-- Right: Stats and Tools -->
+    <aside class="space-y-6">
+      <!-- Stats -->
+      <div class="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow border border-gray-100 hover:shadow-md transition">
+        <h3 class="text-lg font-semibold text-blue-700 mb-3">Quick Health Stats</h3>
+        <canvas id="healthChart" height="160"></canvas>
+      </div>
+
+      <!-- Recent Analyses -->
+      <div class="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow border border-gray-100 hover:shadow-md transition">
+        <h3 class="text-lg font-semibold text-blue-700 mb-3">Recent Analyses</h3>
+        <div id="analysesList" class="max-h-64 overflow-auto text-sm text-gray-700"></div>
+      </div>
+
+      <!-- Tools -->
+      <div class="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow border border-gray-100 hover:shadow-md transition">
+        <h3 class="text-lg font-semibold text-blue-700 mb-3">Smart Tools</h3>
+        <ul class="text-sm text-gray-600 space-y-2">
+          <li class="hover:text-blue-700 transition">AI Nutritionist</li>
+          <li class="hover:text-blue-700 transition">AI Chef (Recipes)</li>
+          <li class="hover:text-blue-700 transition">Exercise Planner</li>
+          <li class="hover:text-blue-700 transition">Diet Recommendations</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+
+<section id="tools" class="hidden p-6">
+  <div class="bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-lg border border-gray-100 transition hover:shadow-xl">
+    <h2 class="text-2xl font-extrabold text-blue-800 mb-6">Smart AI Tools</h2>
+
+    <div id="toolsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="tool-card p-6 bg-gradient-to-br from-green-50 to-blue-50 rounded-xl border hover:shadow-md transition cursor-pointer" data-tool="nutritionist">
+        <h3 class="text-lg font-bold text-green-700 mb-2">🥗 AI Nutritionist</h3>
+        <p class="text-gray-700 text-sm">Get instant personalized nutrition goals from your past health data.</p>
+      </div>
+
+      <div class="tool-card p-6 bg-gradient-to-br from-yellow-50 to-orange-50 rounded-xl border hover:shadow-md transition cursor-pointer" data-tool="chef">
+        <h3 class="text-lg font-bold text-yellow-700 mb-2">👨‍🍳 AI Chef (Recipes)</h3>
+        <p class="text-gray-700 text-sm">See recipes suited to your health & past analyses.</p>
+      </div>
+
+      <div class="tool-card p-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border hover:shadow-md transition cursor-pointer" data-tool="exercise">
+        <h3 class="text-lg font-bold text-indigo-700 mb-2">🏋️‍♂️ Exercise Planner</h3>
+        <p class="text-gray-700 text-sm">Auto-generate workout routines from your reports.</p>
+      </div>
+
+      <div class="tool-card p-6 bg-gradient-to-br from-pink-50 to-red-50 rounded-xl border hover:shadow-md transition cursor-pointer" data-tool="diet">
+        <h3 class="text-lg font-bold text-pink-700 mb-2">🍎 Diet Recommendations</h3>
+        <p class="text-gray-700 text-sm">Instant diet plan using your recent analyses.</p>
+      </div>
+
+      <div class="tool-card p-6 bg-gradient-to-br from-cyan-50 to-sky-50 rounded-xl border hover:shadow-md transition cursor-pointer" data-tool="summary">
+  <h3 class="text-lg font-bold text-sky-700 mb-2">🧾 Health Summary</h3>
+  <p class="text-gray-700 text-sm">Get a full AI report of your overall health progress and improvement tips.</p>
+</div>
+
+    </div>
+
+    <div id="toolOutput" class="mt-8 hidden bg-white p-6 rounded-xl shadow-inner border border-gray-200">
+      <div id="toolTitle" class="text-lg font-semibold text-blue-800 mb-2"></div>
+      <div id="toolResult" class="text-gray-700 whitespace-pre-wrap"></div>
+    </div>
+  </div>
+</section>
+
+
+   <section id="history" class="hidden p-4">
+  <div class="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow border border-gray-100">
+    <h2 class="text-2xl font-bold text-blue-800 mb-4">📜 Health History</h2>
+
+    <!-- Summary Overview -->
+    <div id="historySummary" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-blue-50 p-4 rounded-lg text-center">
+        <div class="text-2xl font-bold text-blue-700" id="totalAnalyses">0</div>
+        <div class="text-sm text-gray-600">Total Analyses</div>
+      </div>
+      <div class="bg-green-50 p-4 rounded-lg text-center">
+        <div class="text-2xl font-bold text-green-700" id="totalCoinsUsed">0</div>
+        <div class="text-sm text-gray-600">Coins Spent</div>
+      </div>
+      <div class="bg-yellow-50 p-4 rounded-lg text-center">
+        <div class="text-md font-semibold text-yellow-700" id="lastActivity">No activity</div>
+        <div class="text-sm text-gray-600">Last Analysis</div>
+      </div>
+    </div>
+
+    <!-- Health Timeline -->
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold text-gray-700">🩺 Analysis Timeline</h3>
+      <button id="summarizeHealthBtn" class="bg-gradient-to-r from-blue-600 to-green-500 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-green-600 transition">
+        Generate Health Summary
+      </button>
+    </div>
+
+    <div id="historyList" class="space-y-3 max-h-[450px] overflow-auto"></div>
+  </div>
+</section>
+
+
+   <section id="settings" class="hidden p-4">
+  <div class="bg-white/90 backdrop-blur-sm p-6 rounded-2xl shadow border border-gray-100 max-w-3xl mx-auto">
+    <h2 class="text-2xl font-bold text-blue-800 mb-6">⚙️ Account Settings</h2>
+
+    <div class="space-y-6">
+      <div>
+        <label class="block text-gray-700 font-semibold mb-1">Full Name</label>
+        <input id="settingsName" type="text" class="w-full p-3 border rounded focus:ring-2 focus:ring-blue-400" />
+      </div>
+
+      <div>
+        <label class="block text-gray-700 font-semibold mb-1">Email</label>
+        <input id="settingsEmail" type="email" class="w-full p-3 border rounded bg-gray-100" disabled />
+      </div>
+
+      <!-- Wallet -->
+      <div class="bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-100">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-gray-700 font-semibold">💰 Wallet Balance</div>
+            <div class="text-2xl font-bold text-blue-700" id="settingsCoins">0 Coins</div>
+          </div>
+          <button id="goToPricing" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 transition">
+            + Add Coins
+          </button>
+        </div>
+      </div>
+
+      <div class="flex justify-between mt-6">
+        <button id="saveSettingsBtn" class="bg-gradient-to-r from-blue-600 to-green-500 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-green-600">
+          Save Changes
+        </button>
+
+        <button id="deleteAccountBtn" class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600">
+          Delete Account
+        </button>
+      </div>
+    </div>
+    <!-- ⚠️ Danger Zone -->
+<div class="mt-10 border-t pt-6">
+  <h3 class="text-xl font-bold text-red-600 mb-3">Danger Zone</h3>
+  <p class="text-sm text-gray-600 mb-4">
+    Permanently delete <b>all</b> your past analysis records. 
+    This action cannot be undone.
+  </p>
+
+  <button 
+    id="openDeleteModalBtn"
+    class="bg-gradient-to-r from-red-500 to-red-700 text-white px-6 py-3 rounded-lg font-semibold hover:from-red-600 hover:to-red-800 shadow-md transition-all"
+  >
+    🧨 Delete Analyze Records
+  </button>
+</div>
+
+<!-- 🩸 Confirm Modal -->
+<div id="deleteModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center hidden z-50">
+  <div class="bg-white rounded-xl p-8 shadow-2xl max-w-md w-full border border-red-200 text-center">
+    <h2 class="text-2xl font-bold text-red-600 mb-3">Confirm Deletion</h2>
+    <p class="text-sm text-gray-600 mb-4">
+      To confirm, type your username (<b id="confirmUsernameText"></b>) below.
+      This will permanently delete all your analysis records.
+    </p>
+
+    <input 
+      id="confirmUsernameInput"
+      type="text"
+      placeholder="Type your username..."
+      class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-red-400 mb-4"
+    />
+
+    <div class="flex justify-end gap-3">
+      <button id="cancelDeleteBtn" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Cancel</button>
+      <button id="confirmDeleteBtn" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition">Confirm Delete</button>
+    </div>
+  </div>
+</div>
+
+  </div>
+</section>
+
+
+<section id="pricing" class="hidden p-6">
+  <div class="bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-lg border border-gray-100 max-w-4xl mx-auto transition hover:shadow-xl">
+    
+    <!-- Wallet Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
+      <div>
+        <h2 class="text-3xl font-extrabold text-blue-800">My Wallet</h2>
+        <p class="text-gray-500 text-sm mt-1">Manage your coins & recharge instantly</p>
+      </div>
+      <div class="mt-4 sm:mt-0">
+        <div class="text-lg font-semibold text-gray-700">
+          Current Balance: 
+          <span id="coinBalance" class="text-blue-600 font-bold ml-1">—</span> coins
+        </div>
+      </div>
+    </div>
+
+    <!-- Coin Purchase Options -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- Custom Recharge -->
+      <div class="bg-gradient-to-br from-blue-50 to-green-50 border border-gray-200 rounded-xl p-6 shadow hover:shadow-md transition">
+        <h3 class="text-xl font-semibold text-blue-700 mb-4">Buy Custom Amount</h3>
+
+        <div class="flex flex-col gap-4">
+          <div>
+            <label class="text-sm text-gray-600">Enter coins (multiple of 10)</label>
+            <input 
+              id="customCoins"
+              type="number"
+              value="50"
+              min="10"
+              step="10"
+              class="mt-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 w-full"
+            />
+          </div>
+
+          <div class="text-gray-700 text-sm">
+            Price: 
+            <span class="font-semibold text-green-600">₹<span id="customPrice">50</span></span>
+          </div>
+
+          <button 
+            id="buyCustomBtn"
+            class="bg-gradient-to-r from-blue-600 to-green-500 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-green-600 shadow-md transition-all"
+          >
+            Buy Coins
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Packs -->
+      <div class="bg-gradient-to-br from-white to-blue-50 border border-gray-200 rounded-xl p-6 shadow hover:shadow-md transition">
+        <h3 class="text-xl font-semibold text-blue-700 mb-4">Quick Recharge</h3>
+        
+        <div class="space-y-3">
+          <button class="buy-fixed w-full text-left px-5 py-3 border rounded-lg hover:bg-blue-50 transition" data-coins="100" data-price="100">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-gray-700">100 Coins</span>
+              <span class="text-blue-700 font-bold">₹100</span>
+            </div>
+          </button>
+          <button class="buy-fixed w-full text-left px-5 py-3 border rounded-lg hover:bg-blue-50 transition" data-coins="250" data-price="250">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-gray-700">250 Coins</span>
+              <span class="text-blue-700 font-bold">₹250</span>
+            </div>
+          </button>
+          <button class="buy-fixed w-full text-left px-5 py-3 border rounded-lg hover:bg-blue-50 transition" data-coins="500" data-price="500">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-gray-700">500 Coins</span>
+              <span class="text-blue-700 font-bold">₹500</span>
+            </div>
+          </button>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-4">1 Analyze = 10 coins • 1 Chat Message = 1 coin</p>
+      </div>
+    </div>
+
+    <!-- Info Banner -->
+    <div class="mt-8 bg-gradient-to-r from-blue-600 to-green-500 text-white py-4 px-6 rounded-xl shadow flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span class="font-medium">Pay only for what you use</span>
+      <span class="text-sm opacity-90">No subscriptions, no renewals — just coins.</span>
+    </div>
+  </div>
+</section>
+
+
+
+
+  </main>
+</div>
+
+
+
+<script>
+  (function() {
+    // Grab *all* sidebar nav buttons, no matter what container padding class it has
+    const navButtons = document.querySelectorAll("aside nav button");
+    const sections = ["dashboard", "tools", "history", "settings", "pricing"];
+
+
+    navButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetSection = btn.dataset.section;
+
+        // Hide all sections except the clicked one
+        sections.forEach((section) => {
+          const el = document.getElementById(section);
+          if (!el) return;
+          el.classList.toggle("hidden", section !== targetSection);
+        });
+
+        // Active state highlight
+        navButtons.forEach(b => b.classList.remove("bg-gradient-to-r", "from-blue-50", "to-green-50", "text-blue-700", "font-semibold", "shadow-sm"));
+        btn.classList.add("bg-gradient-to-r", "from-blue-50", "to-green-50", "text-blue-700", "font-semibold", "shadow-sm");
+
+        // Smooth scroll to top of content
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+  })();
+
+
+  function typeWriterEffect(element, text, speed = 20) {
+  // Convert markdown to HTML
+  const formatted = text
+    .replace(/\n/g, "<br>")
+    .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+    .replace(/### (.*?)(<br>|$)/g, "<h3>$1</h3>")
+    .replace(/## (.*?)(<br>|$)/g, "<h4>$1</h4>")
+    .replace(/# (.*?)(<br>|$)/g, "<h5>$1</h5>");
+
+  let i = 0;
+  element.innerHTML = "";
+
+  // Split into small chunks (not by single character but by tags or text)
+  const parts = formatted.match(/(<[^>]+>|[^<]+)/g) || [];
+
+  function type() {
+    if (i < parts.length) {
+      element.innerHTML += parts[i];
+      i++;
+      setTimeout(type, speed);
+    }
+  }
+
+  type();
+}
+
+
+
+  // Live severity slider value update
+  document.addEventListener("DOMContentLoaded", () => {
+    const slider = document.getElementById("severitySlider");
+    const valueDisplay = document.getElementById("severityValue");
+
+    if (slider && valueDisplay) {
+      slider.addEventListener("input", () => {
+        valueDisplay.textContent = slider.value;
+
+        // Dynamically change color based on severity
+        const val = parseInt(slider.value);
+        let color = "text-green-600";
+        if (val > 3 && val <= 6) color = "text-yellow-600";
+        if (val > 6) color = "text-red-600";
+
+        valueDisplay.className = `w-8 text-center text-lg font-semibold ${color}`;
+      });
+    }
+  });
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const menuToggle = document.getElementById("menuToggle");
+  const sidebar = document.querySelector(".sidebar");
+
+  // Create backdrop element
+  const backdrop = document.createElement("div");
+  backdrop.classList.add("sidebar-backdrop");
+  document.body.appendChild(backdrop);
+
+  menuToggle.addEventListener("click", () => {
+    sidebar.classList.toggle("active");
+    backdrop.classList.toggle("active");
+  });
+
+  // Close sidebar if backdrop clicked
+  backdrop.addEventListener("click", () => {
+    sidebar.classList.remove("active");
+    backdrop.classList.remove("active");
+  });
+});
+</script>
+
+
+</body>
+</html>
